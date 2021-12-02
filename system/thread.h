@@ -18,7 +18,7 @@ public:
 	uint64_t 	get_cur_cid();
 	void 		set_cur_cid(uint64_t cid);
 
-	void 		init(uint64_t thd_id, workload * workload);
+	void 		init(uint64_t thd_id, workload* workload);
 	// the following function must be in the form void* (*)(void*)
 	// to run with pthread.
 	// conversion is done within the function.
@@ -29,15 +29,16 @@ private:
 	ts_t 		_curr_ts;
 	ts_t 		get_next_ts();
 
-	RC	 		runTest(txn_man * txn);
+	RC	 		runTest(txn_man* txn);
 	drand48_data buffer;
 
 	// A restart buffer for aborted txns.
-	struct AbortBufferEntry	{
+	struct AbortBufferEntry {
 		ts_t ready_time;
-		base_query * query;
+		base_query* query;
 	};
-	AbortBufferEntry * _abort_buffer;
+	AbortBufferEntry* _abort_buffer;
+
 	int _abort_buffer_size;
 	int _abort_buffer_empty_slots;
 	bool _abort_buffer_enable;

@@ -3,18 +3,23 @@
 #include "row.h"
 #include "manager.h"
 #include "row_mvcc.h"
-#include "mem_alloc.h"
+#include "utils/mem_alloc.h"
 #include <mm_malloc.h>
 
 #if CC_ALG == MVCC
 
-void Row_mvcc::init(row_t * row) {
+void Row_mvcc::init(row_t* row) {
 	_row = row;
 	_his_len = 4;
 	_req_len = _his_len;
 
-	_write_history = (WriteHisEntry *) _mm_malloc(sizeof(WriteHisEntry) * _his_len, 64);
-	_requests = (ReqEntry *) _mm_malloc(sizeof(ReqEntry) * _req_len, 64);
+#if MALLOC_TYPE == HAWK_ALLOC
+	_write_history = (WriteHisEntry*)malloc_hawk(sizeof(WriteHisEntry) * _his_len);
+	_requests = (ReqEntry*)malloc_hawk(sizeof(ReqEntry) * _req_len);
+#else //MEM_ALLOC
+	_write_history = (WriteHisEntry*)_mm_malloc(sizeof(WriteHisEntry) * _his_len, 64);
+	_requests = (ReqEntry*)_mm_malloc(sizeof(ReqEntry) * _req_len, 64);
+#endif
 	for (uint32_t i = 0; i < _his_len; i++) {
 		_requests[i].valid = false;
 		_write_history[i].valid = false;
@@ -28,13 +33,16 @@ void Row_mvcc::init(row_t * row) {
 	_num_versions = 0;
 	_exists_prewrite = false;
 	_max_served_rts = 0;
-	
+
+#if !ATOMIC_WORD
+	latch = (LATCH_T*)_mm_malloc(sizeof(LATCH_T), 64);
+	new(latch) LATCH_T;
+#else
 	blatch = false;
-	latch = (pthread_mutex_t *) _mm_malloc(sizeof(pthread_mutex_t), 64);
-	pthread_mutex_init(latch, NULL);
+#endif // !ATOMIC_WORD
 }
 
-void Row_mvcc::buffer_req(TsType type, txn_man * txn, bool served)
+void Row_mvcc::buffer_req(TsType type, txn_man* txn, bool served)
 {
 	uint32_t access_num = 1;
 	while (true) {
@@ -53,16 +61,20 @@ void Row_mvcc::buffer_req(TsType type, txn_man * txn, bool served)
 		}
 		assert(access_num == 1);
 		double_list(1);
-		access_num ++;
+		access_num++;
 	}
 }
 
 
-void 
+void
 Row_mvcc::double_list(uint32_t list)
 {
 	if (list == 0) {
-		WriteHisEntry * temp = (WriteHisEntry *) _mm_malloc(sizeof(WriteHisEntry) * _his_len * 2, 64);
+#if MALLOC_TYPE == HAWK_ALLOC
+		WriteHisEntry* temp = (WriteHisEntry*)malloc_hawk(sizeof(WriteHisEntry) * _his_len * 2);
+#else //MEM_ALLOC
+		WriteHisEntry* temp = (WriteHisEntry*)_mm_malloc(sizeof(WriteHisEntry) * _his_len * 2, 64);
+#endif  
 		for (uint32_t i = 0; i < _his_len; i++) {
 			temp[i].valid = _write_history[i].valid;
 			temp[i].reserved = _write_history[i].reserved;
@@ -74,12 +86,19 @@ Row_mvcc::double_list(uint32_t list)
 			temp[i].reserved = false;
 			temp[i].row = NULL;
 		}
+#if MALLOC_TYPE != HAWK_ALLOC
 		_mm_free(_write_history);
+#endif  
 		_write_history = temp;
 		_his_len = _his_len * 2;
-	} else {
+	}
+	else {
 		assert(list == 1);
-		ReqEntry * temp = (ReqEntry *) _mm_malloc(sizeof(ReqEntry) * _req_len * 2, 64);
+#if MALLOC_TYPE == HAWK_ALLOC
+		ReqEntry* temp = (ReqEntry*)malloc_hawk(sizeof(ReqEntry) * _req_len * 2);
+#else
+		ReqEntry* temp = (ReqEntry*)_mm_malloc(sizeof(ReqEntry) * _req_len * 2, 64);
+#endif 
 		for (uint32_t i = 0; i < _req_len; i++) {
 			temp[i].valid = _requests[i].valid;
 			temp[i].type = _requests[i].type;
@@ -87,26 +106,34 @@ Row_mvcc::double_list(uint32_t list)
 			temp[i].txn = _requests[i].txn;
 			temp[i].time = _requests[i].time;
 		}
-		for (uint32_t i = _req_len; i < _req_len * 2; i++) 
+		for (uint32_t i = _req_len; i < _req_len * 2; i++)
 			temp[i].valid = false;
+#if MALLOC_TYPE != HAWK_ALLOC
 		_mm_free(_requests);
+#endif 
 		_requests = temp;
 		_req_len = _req_len * 2;
 	}
 }
 
-RC Row_mvcc::access(txn_man * txn, TsType type, row_t * row) {
+RC Row_mvcc::access(txn_man* txn, TsType type, row_t* row, uint64_t tuple_size) {
 	RC rc = RCOK;
 	ts_t ts = txn->get_ts();
-uint64_t t1 = get_sys_clock();
+	uint64_t t1 = get_sys_clock();
+	backoff_function bf;
 	if (g_central_man)
 		glob_manager->lock_row(_row);
-	else
-		while (!ATOM_CAS(blatch, false, true))
-			PAUSE
-		//pthread_mutex_lock( latch );
-uint64_t t2 = get_sys_clock();
-INC_STATS(txn->get_thd_id(), debug4, t2 - t1);
+	else {
+		bool expected = false;
+		while(!blatch.compare_exchange_weak(expected, true, std::memory_order_relaxed)) {
+			bf();
+			expected = false;
+		}
+		std::atomic_thread_fence(std::memory_order_acquire);
+	}
+	//pthread_mutex_lock( latch );
+	uint64_t t2 = get_sys_clock();
+	INC_STATS(txn->get_thd_id(), debug4, t2 - t1);
 
 #if DEBUG_CC
 	for (uint32_t i = 0; i < _req_len; i++)
@@ -126,48 +153,54 @@ INC_STATS(txn->get_thd_id(), debug4, t2 - t1);
 				// exists a pending prewrite request before the current read. should wait.
 				rc = WAIT;
 				buffer_req(R_REQ, txn, false);
-				txn->ts_ready = false;
-			} else { 
+				txn->ts_ready.store(false, std::memory_order_relaxed);
+			}
+			else {
 				// should just read
 				rc = RCOK;
-				txn->cur_row = _latest_row;
+				txn->cur_row.store(_latest_row, std::memory_order_relaxed);
 				if (ts > _max_served_rts)
 					_max_served_rts = ts;
 			}
-		} else {
+		}
+		else {
 			rc = RCOK;
 			// ts is between _oldest_wts and _latest_wts, should find the correct version
 			uint32_t the_ts = 0;
-		   	uint32_t the_i = _his_len;
-	   		for (uint32_t i = 0; i < _his_len; i++) {
-		   		if (_write_history[i].valid 
-					&& _write_history[i].ts < ts 
-			   		&& _write_history[i].ts > the_ts) 
-	   			{
-		   			the_ts = _write_history[i].ts;
-			  		the_i = i;
+			uint32_t the_i = _his_len;
+			for (uint32_t i = 0; i < _his_len; i++) {
+				if (_write_history[i].valid
+					&& _write_history[i].ts < ts
+					&& _write_history[i].ts > the_ts)
+				{
+					the_ts = _write_history[i].ts;
+					the_i = i;
 				}
 			}
-			if (the_i == _his_len) 
-				txn->cur_row = _row;
-   			else 
-	   			txn->cur_row = _write_history[the_i].row;
+			if (the_i == _his_len)
+				txn->cur_row.store(_row, std::memory_order_relaxed);
+			else
+				txn->cur_row.store(_write_history[the_i].row, std::memory_order_relaxed);
 		}
-	} else if (type == P_REQ) {
+	}
+	else if (type == P_REQ) {
 		if (ts < _latest_wts || ts < _max_served_rts || (_exists_prewrite && _prewrite_ts > ts))
 			rc = Abort;
 		else if (_exists_prewrite) {  // _prewrite_ts < ts
 			rc = WAIT;
 			buffer_req(P_REQ, txn, false);
-			txn->ts_ready = false;
-		} else {
-			rc = RCOK;
-			row_t * res_row = reserveRow(ts, txn);
-			assert(res_row);
-			res_row->copy(_latest_row);
-			txn->cur_row = res_row;
+			txn->ts_ready.store(false, std::memory_order_relaxed);
+
 		}
-	} else if (type == W_REQ) {
+		else {
+			rc = RCOK;
+			row_t* res_row = reserveRow(ts, txn);
+			assert(res_row);
+			res_row->copy(_latest_row, tuple_size);
+			txn->cur_row.store(res_row, std::memory_order_relaxed);
+		}
+	}
+	else if (type == W_REQ) {
 		rc = RCOK;
 		assert(ts > _latest_wts);
 		assert(row == _write_history[_prewrite_his_id].row);
@@ -176,34 +209,36 @@ INC_STATS(txn->get_thd_id(), debug4, t2 - t1);
 		_latest_wts = ts;
 		_latest_row = row;
 		_exists_prewrite = false;
-		_num_versions ++;
+		_num_versions++;
 		update_buffer(txn, W_REQ);
-	} else if (type == XP_REQ) {
+	}
+	else if (type == XP_REQ) {
 		assert(row == _write_history[_prewrite_his_id].row);
 		_write_history[_prewrite_his_id].valid = false;
 		_write_history[_prewrite_his_id].reserved = false;
 		_exists_prewrite = false;
 		update_buffer(txn, XP_REQ);
-	} else 
+	}
+	else
 		assert(false);
-INC_STATS(txn->get_thd_id(), debug3, get_sys_clock() - t2);
+	INC_STATS(txn->get_thd_id(), debug3, get_sys_clock() - t2);
 	if (g_central_man)
 		glob_manager->release_row(_row);
 	else
-		blatch = false;
-		//pthread_mutex_unlock( latch );	
-		
+		blatch.store(false, std::memory_order_release);
+	//pthread_mutex_unlock( latch );	
+
 	return rc;
 }
 
-row_t *
-Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
+row_t*
+Row_mvcc::reserveRow(ts_t ts, txn_man* txn)
 {
 	assert(!_exists_prewrite);
-	
+
 	// Garbage Collection
 	ts_t min_ts = glob_manager->get_min_ts(txn->get_thd_id());
-	if (_oldest_wts < min_ts && 
+	if (_oldest_wts < min_ts &&
 		_num_versions == _his_len)
 	{
 		ts_t max_recycle_ts = 0;
@@ -211,7 +246,7 @@ Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
 		for (uint32_t i = 0; i < _his_len; i++) {
 			if (_write_history[i].valid
 				&& _write_history[i].ts < min_ts
-				&& _write_history[i].ts > max_recycle_ts)		
+				&& _write_history[i].ts > max_recycle_ts)
 			{
 				max_recycle_ts = _write_history[i].ts;
 				idx = i;
@@ -219,7 +254,7 @@ Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
 		}
 		// some entries can be garbage collected.
 		if (idx != _his_len) {
-			row_t * temp = _row;
+			row_t* temp = _row;
 			_row = _write_history[idx].row;
 			_write_history[idx].row = temp;
 			_oldest_wts = max_recycle_ts;
@@ -230,18 +265,18 @@ Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
 					_write_history[i].valid = false;
 					_write_history[i].reserved = false;
 					assert(_write_history[i].row);
-					_num_versions --;
+					_num_versions--;
 				}
 			}
 		}
 	}
-	
+
 #if DEBUG_CC
 	uint32_t his_size = 0;
 	uint64_t max_ts = 0;
-	for (uint32_t i = 0; i < _his_len; i++) 
+	for (uint32_t i = 0; i < _his_len; i++)
 		if (_write_history[i].valid) {
-			his_size ++;
+			his_size++;
 			if (_write_history[i].ts > max_ts)
 				max_ts = _write_history[i].ts;
 		}
@@ -253,24 +288,24 @@ Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
 	// _write_history is not full, find an unused entry for P_REQ.
 	if (_num_versions < _his_len) {
 		for (uint32_t i = 0; i < _his_len; i++) {
-			if (!_write_history[i].valid 
-				&& !_write_history[i].reserved 
-				&& _write_history[i].row != NULL) 
+			if (!_write_history[i].valid
+				&& !_write_history[i].reserved
+				&& _write_history[i].row != NULL)
 			{
 				idx = i;
 				break;
 			}
-			else if (!_write_history[i].valid 
-				 	 && !_write_history[i].reserved)
+			else if (!_write_history[i].valid
+				&& !_write_history[i].reserved)
 				idx = i;
 		}
 		assert(idx < _his_len);
 	}
-	row_t * row;
-	if (idx == _his_len) { 
+	row_t* row;
+	if (idx == _his_len) {
 		if (_his_len >= g_thread_cnt) {
 			// all entries are taken. recycle the oldest version if _his_len is too long already
-			ts_t min_ts = UINT64_MAX; 
+			ts_t min_ts = UINT64_MAX;
 			for (uint32_t i = 0; i < _his_len; i++) {
 				if (_write_history[i].valid && _write_history[i].ts < min_ts) {
 					min_ts = _write_history[i].ts;
@@ -283,8 +318,9 @@ Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
 			_row = _write_history[idx].row;
 			_write_history[idx].row = row;
 			_oldest_wts = min_ts;
-			_num_versions --;
-		} else {
+			_num_versions--;
+		}
+		else {
 			// double the history size. 
 			double_list(0);
 			_prewrite_ts = ts;
@@ -295,11 +331,15 @@ Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
 #endif
 			idx = _his_len / 2;
 		}
-	} 
+	}
 	assert(idx != _his_len);
 	// some entries are not taken. But the row of that entry is NULL.
 	if (!_write_history[idx].row) {
-		_write_history[idx].row = (row_t *) _mm_malloc(sizeof(row_t), 64);
+#if MALLOC_TYPE == HAWK_ALLOC
+		_write_history[idx].row = (row_t*)malloc_hawk(sizeof(row_t));
+#else
+		_write_history[idx].row = (row_t*)_mm_malloc(sizeof(row_t), 64);
+#endif  // THREAD_ALLOC_HAWK
 		_write_history[idx].row->init(MAX_TUPLE_SIZE);
 	}
 	_write_history[idx].valid = false;
@@ -311,38 +351,38 @@ Row_mvcc::reserveRow(ts_t ts, txn_man * txn)
 	return _write_history[idx].row;
 }
 
-void Row_mvcc::update_buffer(txn_man * txn, TsType type) {
+void Row_mvcc::update_buffer(txn_man* txn, TsType type) {
 	// the current txn performs WR or XP.
 	// immediate following R_REQ and P_REQ should return.
 	ts_t ts = txn->get_ts();
 	// figure out the ts for the next pending P_REQ
-	ts_t next_pre_ts = UINT64_MAX ;
-	for (uint32_t i = 0; i < _req_len; i++)	
+	ts_t next_pre_ts = UINT64_MAX;
+	for (uint32_t i = 0; i < _req_len; i++)
 		if (_requests[i].valid && _requests[i].type == P_REQ
 			&& _requests[i].ts > ts
 			&& _requests[i].ts < next_pre_ts)
 			next_pre_ts = _requests[i].ts;
 	// return all pending quests between txn->ts and next_pre_ts
-	for (uint32_t i = 0; i < _req_len; i++)	{
-		if (_requests[i].valid)	
+	for (uint32_t i = 0; i < _req_len; i++) {
+		if (_requests[i].valid)
 			assert(_requests[i].ts > ts);
 		// return pending R_REQ 
 		if (_requests[i].valid && _requests[i].type == R_REQ && _requests[i].ts < next_pre_ts) {
 			if (_requests[i].ts > _max_served_rts)
 				_max_served_rts = _requests[i].ts;
 			_requests[i].valid = false;
-			_requests[i].txn->cur_row = _latest_row;
-			_requests[i].txn->ts_ready = true;
+			_requests[i].txn->cur_row.store(_latest_row, std::memory_order_relaxed);
+			_requests[i].txn->ts_ready.store(true, memory_order_release);
 		}
 		// return one pending P_REQ
 		else if (_requests[i].valid && _requests[i].ts == next_pre_ts) {
 			assert(_requests[i].type == P_REQ);
-			row_t * res_row = reserveRow(_requests[i].ts, txn);
+			row_t* res_row = reserveRow(_requests[i].ts, txn);
 			assert(res_row);
-			res_row->copy(_latest_row);
+			res_row->copy(_latest_row, _latest_row->get_tuple_size());
 			_requests[i].valid = false;
-			_requests[i].txn->cur_row = res_row;
-			_requests[i].txn->ts_ready = true;
+			_requests[i].txn->cur_row.store(res_row, std::memory_order_relaxed);
+			_requests[i].txn->ts_ready.store(true, memory_order_release);
 		}
 	}
 }

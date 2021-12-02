@@ -10,15 +10,15 @@
 #include "vll.h"
 #include "ycsb_query.h"
 #include "tpcc_query.h"
-#include "mem_alloc.h"
+#include "utils/mem_alloc.h"
 #include "test.h"
 
-void thread_t::init(uint64_t thd_id, workload * workload) {
+void thread_t::init(uint64_t thd_id, workload* workload) {
 	_thd_id = thd_id;
 	_wl = workload;
 	srand48_r((_thd_id + 1) * get_sys_clock(), &buffer);
 	_abort_buffer_size = ABORT_BUFFER_SIZE;
-	_abort_buffer = (AbortBufferEntry *) _mm_malloc(sizeof(AbortBufferEntry) * _abort_buffer_size, 64); 
+	_abort_buffer = (AbortBufferEntry*)_mm_malloc(sizeof(AbortBufferEntry) * _abort_buffer_size, 64);
 	for (int i = 0; i < _abort_buffer_size; i++)
 		_abort_buffer[i].query = NULL;
 	_abort_buffer_empty_slots = _abort_buffer_size;
@@ -98,9 +98,10 @@ RC thread_t::run() {
 		}
 		INC_STATS(_thd_id, time_query, get_sys_clock() - starttime);
 		m_txn->abort_cnt = 0;
-//#if CC_ALG == VLL
-//		_wl->get_txn_man(m_txn, this);
-//#endif
+
+		//#if CC_ALG == VLL
+		//		_wl->get_txn_man(m_txn, this);
+		//#endif
 		m_txn->set_txn_id(get_thd_id() + thd_txn_id * g_thread_cnt);
 		thd_txn_id ++;
 
@@ -183,18 +184,22 @@ RC thread_t::run() {
 
 		if (rc == FINISH)
 			return rc;
-		if (!warmup_finish && txn_cnt >= WARMUP / g_thread_cnt) 
+		if (!warmup_finish.load(std::memory_order_relaxed) && txn_cnt >= WARMUP / g_thread_cnt) 
 		{
 			stats.clear( get_thd_id() );
 			return FINISH;
 		}
 
-		if (warmup_finish && txn_cnt >= MAX_TXN_PER_PART) {
+		if (warmup_finish.load(std::memory_order_relaxed) && txn_cnt >= MAX_TXN_PER_PART) {
 			assert(txn_cnt == MAX_TXN_PER_PART);
-	        if( !ATOM_CAS(_wl->sim_done, false, true) )
-				assert( _wl->sim_done);
+	        /* if( !ATOM_CAS(_wl->sim_done, false, true) )
+				assert( _wl->sim_done); */
+			bool expected = false;
+			if (!_wl->sim_done.compare_exchange_strong(expected, true)) {
+				assert(expected);
+			}
 	    }
-	    if (_wl->sim_done) {
+	    if (_wl->sim_done.load(std::memory_order_relaxed)) {
    		    return FINISH;
    		}
 	}
@@ -218,25 +223,27 @@ thread_t::get_next_ts() {
 	}
 }
 
-RC thread_t::runTest(txn_man * txn)
+RC thread_t::runTest(txn_man* txn)
 {
-	RC rc = RCOK;
-	if (g_test_case == READ_WRITE) {
-		rc = ((TestTxnMan *)txn)->run_txn(g_test_case, 0);
-#if CC_ALG == OCC
-		txn->start_ts = get_next_ts(); 
-#endif
-		rc = ((TestTxnMan *)txn)->run_txn(g_test_case, 1);
-		printf("READ_WRITE TEST PASSED\n");
-		return FINISH;
-	}
-	else if (g_test_case == CONFLICT) {
-		rc = ((TestTxnMan *)txn)->run_txn(g_test_case, 0);
-		if (rc == RCOK)
+	/*
+		RC rc = RCOK;
+		if (g_test_case == READ_WRITE) {
+			rc = ((TestTxnMan *)txn)->run_txn(g_test_case, 0);
+	#if CC_ALG == OCC
+			txn->start_ts = get_next_ts();
+	#endif
+			rc = ((TestTxnMan *)txn)->run_txn(g_test_case, 1);
+			printf("READ_WRITE TEST PASSED\n");
 			return FINISH;
-		else 
-			return rc;
-	}
+		}
+		else if (g_test_case == CONFLICT) {
+			rc = ((TestTxnMan *)txn)->run_txn(g_test_case, 0);
+			if (rc == RCOK)
+				return FINISH;
+			else
+				return rc;
+		}
+	*/
 	assert(false);
 	return RCOK;
 }

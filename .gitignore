@@ -1,2 +1,11 @@
 *.o
 *.d
+dump_from_server
+build
+build_*
+results
+20*
+.vs/
+.vscode/
+out/
+CMakeSettings.json

@@ -1,0 +1,5 @@
+add_library(pcm STATIC msr.cpp pci.cpp cpucounters.cpp utils.cpp client_bw.cpp mmio.cpp)
+target_include_directories(pcm PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+#target_compile_options(pcm PUBLIC -mcx16 -Wno-invalid-offsetof -Wreorder)
+#target_compile_options(pcm PUBLIC )
+target_link_libraries(pcm PUBLIC  -pthread -lrt)

@@ -7,6 +7,7 @@ public:
 
 	char _pad2[CL_SIZE];
 	uint64_t txn_cnt;
+	uint64_t neworder_cnt;
 	uint64_t abort_cnt;
 	double run_time;
 	double time_man;
@@ -36,7 +37,7 @@ public:
 	double time_man;
 	double time_index;
 	double time_wait;
-	char _pad[CL_SIZE - sizeof(double)*3];
+	char _pad[CL_SIZE - sizeof(double) * 3];
 };
 
 class Stats {

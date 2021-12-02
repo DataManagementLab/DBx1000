@@ -18,15 +18,15 @@ public:
 // All the querise for a particular thread.
 class Query_thd {
 public:
-	void init(workload * h_wl, int thread_id);
-	base_query * get_next_query(); 
+	void init(workload* h_wl, int thread_id);
+	base_query* get_next_query();
 	int q_idx;
 #if WORKLOAD == YCSB
-	ycsb_query * queries;
+	ycsb_query* queries;
 #else 
-	tpcc_query * queries;
+	tpcc_query* queries;
 #endif
-	char pad[CL_SIZE - sizeof(void *) - sizeof(int)];
+	char pad[CL_SIZE - sizeof(void*) - sizeof(int)];
 	drand48_data buffer;
 };
 
@@ -35,14 +35,14 @@ public:
 // queue model might be implemented.
 class Query_queue {
 public:
-	void init(workload * h_wl);
+	void init(workload* h_wl);
 	void init_per_thread(int thread_id);
-	base_query * get_next_query(uint64_t thd_id); 
-	
-private:
-	static void * threadInitQuery(void * This);
+	base_query* get_next_query(uint64_t thd_id);
 
-	Query_thd ** all_queries;
-	workload * _wl;
+private:
+	static void* threadInitQuery(void* This);
+
+	Query_thd** all_queries;
+	workload* _wl;
 	static int _next_tid;
 };

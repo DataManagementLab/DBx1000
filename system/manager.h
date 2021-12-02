@@ -18,26 +18,28 @@ public:
 
 	// HACK! the following mutexes are used to model a centralized
 	// lock/timestamp manager. 
- 	void 			lock_row(row_t * row);
-	void 			release_row(row_t * row);
-	
-	txn_man * 		get_txn_man(int thd_id) { return _all_txns[thd_id]; };
-	void 			set_txn_man(txn_man * txn);
-	
+	void 			lock_row(row_t* row);
+	void 			release_row(row_t* row);
+
+	txn_man*		get_txn_man(int thd_id) { return _all_txns[thd_id]; };
+	void 			set_txn_man(txn_man* txn);
+
 	uint64_t 		get_epoch() { return *_epoch; };
 	void 	 		update_epoch();
 private:
 	// for SILO
-	volatile uint64_t * _epoch;		
-	ts_t * 			_last_epoch_update_time;
+	std::atomic_uint64_t* _epoch;
+	ts_t*			_last_epoch_update_time;
 
 	pthread_mutex_t ts_mutex;
-	uint64_t *		timestamp;
+	uint64_t*		timestamp;
 	pthread_mutex_t mutexes[BUCKET_CNT];
-	uint64_t 		hash(row_t * row);
-	ts_t volatile * volatile * volatile all_ts;
-	txn_man ** 		_all_txns;
+	uint64_t 		hash(row_t* row);
+	//ts_t volatile* volatile* volatile all_ts;
+	std::atomic<ts_t>** all_ts;
+	txn_man**		_all_txns;
+
 	// for MVCC 
-	volatile ts_t	_last_min_ts_time;
+	std::atomic<ts_t>	_last_min_ts_time;
 	ts_t			_min_ts;
 };

@@ -1,4 +1,4 @@
-#include "mem_alloc.h"
+#include "utils/mem_alloc.h"
 #include "index_btree.h"
 #include "row.h"
 

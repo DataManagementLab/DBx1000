@@ -1,7 +1,7 @@
 #include "global.h"
 #include "helper.h"
 #include "plock.h"
-#include "mem_alloc.h"
+#include "utils/mem_alloc.h"
 #include "txn.h"
 
 /************************************************/
@@ -11,66 +11,99 @@ void PartMan::init() {
 	uint64_t part_id = get_part_id(this);
 	waiter_cnt = 0;
 	owner = NULL;
-	waiters = (txn_man **)
-		mem_allocator.alloc(sizeof(txn_man *) * g_thread_cnt, part_id);
-	pthread_mutex_init( &latch, NULL );
+	waiters = (txn_man**)
+		mem_allocator.alloc(sizeof(txn_man*) * g_thread_cnt, part_id);
 }
 
-RC PartMan::lock(txn_man * txn) {
+RC PartMan::lock(txn_man* txn) {
 	RC rc;
 
-	pthread_mutex_lock( &latch );
+#if SCOPED_LATCH
+	SCOPED_LATCH_T::scoped_lock lock(latch);
+#else
+	latch.lock();
+#endif  // SCOPED_LATCH
 	if (owner == NULL) {
 		owner = txn;
 		rc = RCOK;
-	} else if (owner->get_ts() < txn->get_ts()) {
+	}
+	else if (owner->get_ts() < txn->get_ts()) {
 		int i;
 		assert(waiter_cnt < g_thread_cnt);
 		for (i = waiter_cnt; i > 0; i--) {
 			if (txn->get_ts() > waiters[i - 1]->get_ts()) {
 				waiters[i] = txn;
 				break;
-			} else 
+			}
+			else
 				waiters[i] = waiters[i - 1];
 		}
 		if (i == 0)
 			waiters[i] = txn;
-		waiter_cnt ++;
+		waiter_cnt++;
+#if USE_ATOMIC
+		txn->ready_part.fetch_add(1, std::memory_order_relaxed);
+#else
 		ATOM_ADD(txn->ready_part, 1);
+#endif  // USE_ATOMIC
 		rc = WAIT;
-	} else
+	}
+	else
 		rc = Abort;
-	pthread_mutex_unlock( &latch );
+#if !SCOPED_LATCH
+	latch.unlock();
+#endif  // !SCOPED_LATCH
 	return rc;
 }
 
-void PartMan::unlock(txn_man * txn) {
-	pthread_mutex_lock( &latch );
-	if (txn == owner) {		
-		if (waiter_cnt == 0) 
+void PartMan::unlock(txn_man* txn) {
+#if SCOPED_LATCH
+	SCOPED_LATCH_T::scoped_lock lock(latch);
+#else
+	latch.lock();
+#endif  // SCOPED_LATCH
+	if (txn == owner) {
+		if (waiter_cnt == 0)
 			owner = NULL;
 		else {
-			owner = waiters[0];			
+			owner = waiters[0];
 			for (UInt32 i = 0; i < waiter_cnt - 1; i++) {
-				assert( waiters[i]->get_ts() < waiters[i + 1]->get_ts() );
+				assert(waiters[i]->get_ts() < waiters[i + 1]->get_ts());
 				waiters[i] = waiters[i + 1];
 			}
-			waiter_cnt --;
+			waiter_cnt--;
+#if USE_ATOMIC
+			owner->ready_part.fetch_sub(1, std::memory_order_relaxed);
+#else
 			ATOM_SUB(owner->ready_part, 1);
-		} 
-	} else {
+#endif  // USE_ATOMIC
+			assert(waiter_cnt >= 0);
+			assert(owner->ready_part >= 0);
+		}
+	}
+	else {
 		bool find = false;
 		for (UInt32 i = 0; i < waiter_cnt; i++) {
-			if (waiters[i] == txn) 
+			if (waiters[i] == txn)
 				find = true;
-			if (find && i < waiter_cnt - 1) 
+			if (find && i < waiter_cnt - 1)
 				waiters[i] = waiters[i + 1];
 		}
+#if USE_ATOMIC
+		txn->ready_part.fetch_sub(1, std::memory_order_relaxed);
+#else
 		ATOM_SUB(txn->ready_part, 1);
+#endif  // USE_ATOMIC
 		assert(find);
-		waiter_cnt --;
+		waiter_cnt--;
+		assert(waiter_cnt >= 0);
+		assert(owner->ready_part >= 0);
 	}
-	pthread_mutex_unlock( &latch );
+
+
+#if !SCOPED_LATCH
+	latch.unlock();
+#endif  // !SCOPED_LATCH
 }
 
 /************************************************/
@@ -83,11 +116,11 @@ void Plock::init() {
 		part_mans[i]->init();
 }
 
-RC Plock::lock(txn_man * txn, uint64_t * parts, uint64_t part_cnt) {
+RC Plock::lock(txn_man* txn, uint64_t* parts, uint64_t part_cnt) {
 	RC rc = RCOK;
 	ts_t starttime = get_sys_clock();
 	UInt32 i;
-	for (i = 0; i < part_cnt; i ++) {
+	for (i = 0; i < part_cnt; i++) {
 		uint64_t part_id = parts[i];
 		rc = part_mans[part_id]->lock(txn);
 		if (rc == Abort)
@@ -102,19 +135,36 @@ RC Plock::lock(txn_man * txn, uint64_t * parts, uint64_t part_cnt) {
 		INC_TMP_STATS(txn->get_thd_id(), time_man, get_sys_clock() - starttime);
 		return Abort;
 	}
-	if (txn->ready_part > 0) {
+#if USE_ATOMIC
+	if (txn->ready_part.load(std::memory_order_relaxed) > 0) {
+#else
+	if (__atomic_load_4(&txn->ready_part, __ATOMIC_RELAXED) > 0) {
+#endif // USE_ATOMIC
+		backoff_function bf;
 		ts_t t = get_sys_clock();
-		while (txn->ready_part > 0) {}
+#if USE_ATOMIC
+		while (txn->ready_part.load(std::memory_order_relaxed) > 0)
+#else
+		while (__atomic_load_4(&txn->ready_part, __ATOMIC_RELAXED) > 0)
+#endif  // USE_ATOMIC
+		{
+			bf();
+		}
 		INC_TMP_STATS(txn->get_thd_id(), time_wait, get_sys_clock() - t);
 	}
-	assert(txn->ready_part == 0);
+	std::atomic_thread_fence(std::memory_order_acquire);
+#if USE_ATOMIC
+	assert(txn->ready_part.load(std::memory_order_relaxed) == 0);
+#else
+	assert(__atomic_load_4(&txn->ready_part, __ATOMIC_RELAXED) == 0);
+#endif  // USE_ATOMIC
 	INC_TMP_STATS(txn->get_thd_id(), time_man, get_sys_clock() - starttime);
 	return RCOK;
 }
 
-void Plock::unlock(txn_man * txn, uint64_t * parts, uint64_t part_cnt) {
+void Plock::unlock(txn_man* txn, uint64_t* parts, uint64_t part_cnt) {
 	ts_t starttime = get_sys_clock();
-	for (UInt32 i = 0; i < part_cnt; i ++) {
+	for (UInt32 i = 0; i < part_cnt; i++) {
 		uint64_t part_id = parts[i];
 		part_mans[part_id]->unlock(txn);
 	}

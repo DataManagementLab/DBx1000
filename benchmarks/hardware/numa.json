@@ -1,0 +1,264 @@
+{
+   "Variables": [
+      {
+         "Comment": "The <Value> should be adapted to the HANA log volume path",
+         "Name": "LogVolume",
+         "OLD_Value": "/hana/log",
+         "OLD_Request": "true",
+         "Value": "/dev/null",
+         "Request": "false"
+      },
+      {
+         "Comment": "The <Value> should be adapted to the HANA data volume path",
+         "Name": "DataVolume",
+         "OLD_Value": "/hana/data",
+         "OLD_Request": "true",
+         "Value": "/dev/null",
+         "Request": "false",
+         "Profile": "LNX"
+      },
+      {
+         "Comment": "Hosts for scale-out measurements, keep this empty for scale-up",
+         "Name": "Hosts",
+         "Value": "",
+         "OLD_Request": "true",
+         "Request": "false"
+      },
+      {
+         "Comment": "Persistent memory mount pathes, keep this empty fo non nvm systems",
+         "Name": "NvmBasePath",
+         "Value": "",
+         "OLD_Request": "true",
+         "Request": "false"
+      },
+      {
+         "Comment": "The <Value> is the general test repeat count",
+         "Name": "TestRepeatCount",
+         "Value": "2",
+         "Request": "false"
+      },
+      {
+         "Comment": "Port for network tests",
+         "Name": "Port",
+         "Value": "50001",
+         "Request": "false"
+      },
+      {
+         "Comment": "Remote port for scaleout triggers (this is the port hcmt is listening to)",
+         "Name": "RemotePort",
+         "Value": "50000",
+         "Request": "false"
+      },
+      {
+         "Comment": "Size of data used for network io",
+         "Name": "DataSize",
+         "Value": "100000000",
+         "Request": "false"
+      },
+      {
+         "Comment": "The <Value> is the networktest repeat count",
+         "Name": "NetworktestRepeatCount",
+         "Value": "5",
+         "Request": "false"
+      },
+      {
+         "Comment": "The <Value> is the networktest repeat count when multiple channels are used",
+         "Name": "NetworktestRepeatCountMultiChannel",
+         "Value": "1",
+         "Request": "false"
+      },
+      {
+         "Comment": "Block size in Bytes, the blocks are secured with an CRC",
+         "Name": "BlockSize",
+         "Value": "1024",
+         "Request": "false"
+      },
+      {
+         "Comment": "HCI number of blocks (->16MB file size)",
+         "Name": "NumOfBlocks",
+         "Value": "16384",
+         "Request": "false"
+      },
+      {
+         "Comment": "HCI maximum blocks per chunk (->1MB biggest block)",
+         "Name": "MaxBlocksPerChunk",
+         "Value": "1024",
+         "Request": "false"
+      },
+      {
+         "Comment": "HCI test duration in seconds(->20s)",
+         "Name": "TestDuration",
+         "Value": "20",
+         "Request": "false"
+      },
+      {
+         "Comment": "HCI reopen file after some seconds (->2s)",
+         "Name": "FileReopenTime",
+         "Value": "2",
+         "Request": "false"
+      },
+      {
+         "Comment": "File system concurrent execution (->true)",
+         "Name": "FSConcurrentExecution",
+         "Value": "true",
+         "Request": "false"
+      },
+
+
+      {
+         "Comment": "Log Volume: Controls whether read requests are submitted asynchronously, default is 'on'",
+         "Name": "LogAsyncReadSubmit",
+         "Value": "on",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Controls whether read requests are submitted asynchronously, default is 'on'",
+         "Name": "DataAsyncReadSubmit",
+         "Value": "on",
+         "Request": "false"
+      },
+      {
+         "Comment": "Log Volume: Controls whether write requests can be submitted asynchronously",
+         "Name": "LogAsyncWriteSubmitActive",
+         "Value": "on",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Controls whether write requests can be submitted asynchronously",
+         "Name": "DataAsyncWriteSubmitActive",
+         "Value": "on",
+         "Request": "false"
+      },
+      {
+         "Comment": "Log Volume: Controls which blocks are written asynchronously. Only relevant if AsyncWriteSubmitActive is 'on' or 'auto' and file system is flagged as requiring asynchronous write submits",
+         "Name": "LogAsyncWriteSubmitBlocks",
+         "Value": "all",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Controls which blocks are written asynchronously. Only relevant if AsyncWriteSubmitActive is 'on' or 'auto' and file system is flagged as requiring asynchronous write submits",
+         "Name": "DataAsyncWriteSubmitBlocks",
+         "Value": "all",
+         "Request": "false"
+      },
+      {
+         "Comment": "Log Volume: Maximum number of parallel I/O requests per completion queue",
+         "Name": "LogExtMaxParallelIoRequests",
+         "Value": "64",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Maximum number of parallel I/O requests per completion queue",
+         "Name": "DataExtMaxParallelIoRequests",
+         "Value": "64",
+         "Request": "false"
+      },
+      {
+         "Comment": "Log Volume: Maximum batch size for asynchronous submits",
+         "Name": "LogExtMaxSubmitBatchSize",
+         "Value": "64",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Maximum batch size for asynchronous submits",
+         "Name": "DataExtMaxSubmitBatchSize",
+         "Value": "64",
+         "Request": "false"
+      },
+      {
+         "Comment": "Log Volume: Minimum batch size for asynchronous submits",
+         "Name": "LogExtMinSubmitBatchSize",
+         "Value": "16",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Minimum batch size for asynchronous submits",
+         "Name": "DataExtMinSubmitBatchSize",
+         "Value": "16",
+         "Request": "false"
+      },
+      {
+         "Comment": "Log Volume: Number of completion queues",
+         "Name": "LogExtNumCompletionQueues",
+         "Value": "1",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Number of completion queues",
+         "Name": "DataExtNumCompletionQueues",
+         "Value": "1",
+         "Request": "false"
+      },
+      {
+         "Comment": "Log Volume: Number of completion queues",
+         "Name": "LogExtNumSubmitQueues",
+         "Value": "1",
+         "Request": "false"
+      },
+      {
+         "Comment": "Data Volume: Number of completion queues",
+         "Name": "DataExtNumSubmitQueues",
+         "Value": "1",
+         "Request": "false"
+      },
+      {
+         "Comment": "Size of the kernel I/O queue per completion queue",
+         "Name": "ExtSizeKernelIoQueue",
+         "Value": "512",
+         "Request": "false"
+      }
+
+
+   ],
+   "ExecutionPlan": [
+      {
+         "ID": "36324424-F9CC-44DF-820752124C6A5652",
+         "Note": "NUMA Memory Latency Test",
+         "ExecutionVariants": [
+            {
+               "ScaleOut": {
+                  "Port": "${RemotePort}",
+                  "Hosts": "${Hosts}",
+                  "ConcurrentExecution": true
+               },
+               "RepeatCount": "1",
+               "Description": "Simple NUMA Memory Latency Check",
+               "InputVector": {
+                  "TestTime": 10,
+                  "Memory": 100000,
+                  "Stride": 64,
+                  "MemNumaNode": -1,
+                  "CPUNumaNode": 0,
+                  "Loaded": false,
+                  "StealingPolicy": 3,
+                  "LoadThreadsCPUNode": 3
+               }
+            }
+         ]
+      },
+      {
+         "ID": "113FE950-77A4-41CF-884BAF25F4EB27F0",
+         "Note": "NUMA Memory Bandwidth Test",
+         "ExecutionVariants": [
+            {
+               "ScaleOut": {
+                  "Port": "${RemotePort}",
+                  "Hosts": "${Hosts}",
+                  "ConcurrentExecution": true
+               },
+               "RepeatCount": "1",
+               "Description": "Simple NUMA Memory Bandwidth Check",
+               "InputVector": {
+                  "TestTime": 20,
+                  "Memory": 100000,
+                  "Stride": 64,
+                  "MemNumaNode": -1,
+                  "Loaded": false,
+                  "StealingPolicy": 0,
+                  "LoadThreadsCPUNode": -1
+               }
+            }
+         ]
+      }
+   ]
+}

@@ -1,7 +1,7 @@
 #include "global.h"
 #include "helper.h"
 #include "stats.h"
-#include "mem_alloc.h"
+#include "utils/mem_alloc.h"
 
 #define BILLION 1000000000UL
 
@@ -15,6 +15,7 @@ void Stats_thd::init(uint64_t thd_id) {
 
 void Stats_thd::clear() {
 	txn_cnt = 0;
+	neworder_cnt = 0;
 	abort_cnt = 0;
 	run_time = 0;
 	time_man = 0;
@@ -56,11 +57,11 @@ void Stats::init() {
 }
 
 void Stats::init(uint64_t thread_id) {
-	if (!STATS_ENABLE) 
+	if (!STATS_ENABLE)
 		return;
-	_stats[thread_id] = (Stats_thd *) 
+	_stats[thread_id] = (Stats_thd*)
 		_mm_malloc(sizeof(Stats_thd), 64);
-	tmp_stats[thread_id] = (Stats_tmp *)
+	tmp_stats[thread_id] = (Stats_tmp*)
 		_mm_malloc(sizeof(Stats_tmp), 64);
 
 	_stats[thread_id]->init(thread_id);
@@ -98,14 +99,14 @@ void Stats::commit(uint64_t thd_id) {
 	}
 }
 
-void Stats::abort(uint64_t thd_id) {	
-	if (STATS_ENABLE) 
+void Stats::abort(uint64_t thd_id) {
+	if (STATS_ENABLE)
 		tmp_stats[thd_id]->init();
 }
 
 void Stats::print() {
-	
 	uint64_t total_txn_cnt = 0;
+	uint64_t total_neworder_cnt = 0;
 	uint64_t total_abort_cnt = 0;
 	double total_run_time = 0;
 	double total_time_man = 0;
@@ -121,8 +122,10 @@ void Stats::print() {
 	double total_time_ts_alloc = 0;
 	double total_latency = 0;
 	double total_time_query = 0;
-	for (uint64_t tid = 0; tid < g_thread_cnt; tid ++) {
+
+	for (uint64_t tid = 0; tid < g_thread_cnt; tid++) {
 		total_txn_cnt += _stats[tid]->txn_cnt;
+		total_neworder_cnt += _stats[tid]->neworder_cnt;
 		total_abort_cnt += _stats[tid]->abort_cnt;
 		total_run_time += _stats[tid]->run_time;
 		total_time_man += _stats[tid]->time_man;
@@ -138,22 +141,56 @@ void Stats::print() {
 		total_time_ts_alloc += _stats[tid]->time_ts_alloc;
 		total_latency += _stats[tid]->latency;
 		total_time_query += _stats[tid]->time_query;
-		
-		printf("[tid=%ld] txn_cnt=%ld,abort_cnt=%ld\n", 
+
+		printf("[tid=%ld] txn_cnt=%ld,neworder_cnt=%ld,abort_cnt=%ld\n",
 			tid,
 			_stats[tid]->txn_cnt,
+			_stats[tid]->neworder_cnt,
 			_stats[tid]->abort_cnt
 		);
 	}
-	FILE * outf;
+
+	FILE* outf;
 	if (output_file != NULL) {
-		outf = fopen(output_file, "w");
-		fprintf(outf, "[summary] txn_cnt=%ld, abort_cnt=%ld"
-			", run_time=%f, time_wait=%f, time_ts_alloc=%f"
-			", time_man=%f, time_index=%f, time_abort=%f, time_cleanup=%f, latency=%f"
-			", deadlock_cnt=%ld, cycle_detect=%ld, dl_detect_time=%f, dl_wait_time=%f"
-			", time_query=%f, debug1=%f, debug2=%f, debug3=%f, debug4=%f, debug5=%f\n",
-			total_txn_cnt, 
+		outf = fopen(output_file, "a");
+		/*
+				fprintf(outf, "[summary] txn_cnt=%ld, abort_cnt=%ld"
+					", run_time=%f, time_wait=%f, time_ts_alloc=%f"
+					", time_man=%f, time_index=%f, time_abort=%f, time_cleanup=%f, latency=%f"
+					", deadlock_cnt=%ld, cycle_detect=%ld, dl_detect_time=%f, dl_wait_time=%f"
+					", time_query=%f, debug1=%f, debug2=%f, debug3=%f, debug4=%f, debug5=%f\n",
+					total_txn_cnt,
+					total_abort_cnt,
+					total_run_time / BILLION,
+					total_time_wait / BILLION,
+					total_time_ts_alloc / BILLION,
+					(total_time_man - total_time_wait) / BILLION,
+					total_time_index / BILLION,
+					total_time_abort / BILLION,
+					total_time_cleanup / BILLION,
+					total_latency / BILLION / total_txn_cnt,
+					deadlock,
+					cycle_detect,
+					dl_detect_time / BILLION,
+					dl_wait_time / BILLION,
+					total_time_query / BILLION,
+					total_debug1, // / BILLION,
+					total_debug2, // / BILLION,
+					total_debug3, // / BILLION,
+					total_debug4, // / BILLION,
+					total_debug5 / BILLION
+				);
+		*/
+		// Print CSV header only if file is empty
+		if (ftell(outf) == 0)
+		{
+			fprintf(outf, "txn_cnt;neworder_cnt;abort_cnt;run_time;time_wait;time_ts_alloc;time_man;time_index;time_abort;time_cleanup;latency"
+				";deadlock_cnt;cycle_detect;dl_detect_time;dl_wait_time;time_query;debug1;debug2;debug3;debug4;debug5\n");
+		}
+
+		fprintf(outf, "%ld;%ld;%ld;%f;%f;%f;%f;%f;%f;%f;%f;%ld;%ld;%f;%f;%f;%f;%f;%f;%f;%f\n",
+			total_txn_cnt,
+			total_neworder_cnt,
 			total_abort_cnt,
 			total_run_time / BILLION,
 			total_time_wait / BILLION,
@@ -176,12 +213,13 @@ void Stats::print() {
 		);
 		fclose(outf);
 	}
-	printf("[summary] txn_cnt=%ld, abort_cnt=%ld"
+	printf("[summary] txn_cnt=%ld, neworder_cnt=%ld, abort_cnt=%ld"
 		", run_time=%f, time_wait=%f, time_ts_alloc=%f"
 		", time_man=%f, time_index=%f, time_abort=%f, time_cleanup=%f, latency=%f"
 		", deadlock_cnt=%ld, cycle_detect=%ld, dl_detect_time=%f, dl_wait_time=%f"
-		", time_query=%f, debug1=%f, debug2=%f, debug3=%f, debug4=%f, debug5=%f\n", 
-		total_txn_cnt, 
+		", time_query=%f, debug1=%f, debug2=%f, debug3=%f, debug4=%f, debug5=%f\n",
+		total_txn_cnt,
+		total_neworder_cnt,
 		total_abort_cnt,
 		total_run_time / BILLION,
 		total_time_wait / BILLION,
@@ -207,18 +245,18 @@ void Stats::print() {
 }
 
 void Stats::print_lat_distr() {
-	FILE * outf;
+	FILE* outf;
 	if (output_file != NULL) {
 		outf = fopen(output_file, "a");
-		for (UInt32 tid = 0; tid < g_thread_cnt; tid ++) {
+		for (UInt32 tid = 0; tid < g_thread_cnt; tid++) {
 			fprintf(outf, "[all_debug1 thd=%d] ", tid);
-			for (uint32_t tnum = 0; tnum < _stats[tid]->txn_cnt; tnum ++) 
+			for (uint32_t tnum = 0; tnum < _stats[tid]->txn_cnt; tnum++)
 				fprintf(outf, "%ld,", _stats[tid]->all_debug1[tnum]);
 			fprintf(outf, "\n[all_debug2 thd=%d] ", tid);
-			for (uint32_t tnum = 0; tnum < _stats[tid]->txn_cnt; tnum ++) 
+			for (uint32_t tnum = 0; tnum < _stats[tid]->txn_cnt; tnum++)
 				fprintf(outf, "%ld,", _stats[tid]->all_debug2[tnum]);
 			fprintf(outf, "\n");
 		}
 		fclose(outf);
-	} 
+	}
 }
